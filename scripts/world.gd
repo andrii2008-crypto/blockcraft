@@ -6,7 +6,8 @@ const CS := 16
 const SY := 64
 const SEA := 22
 const VOL := CS * SY * CS      # в байте [VOL] хранится максимальная высота чанка
-const RD := 4                  # дальность прорисовки в чанках
+var rd := 4                    # дальность прорисовки в чанках (меняется в настройках)
+var fresh := false             # true = новый мир, не загружать сохранение
 const MAX_GEN := 3
 const MAX_MESH := 3
 const SAVE_PATH := "user://world2.dat"
@@ -66,7 +67,7 @@ func setup() -> void:
 	water_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	if not load_world():
+	if fresh or not load_world():
 		seed_val = randi() % 1000000
 	spawn_xz = find_spawn()
 	if has_saved_pos:
@@ -576,9 +577,9 @@ func _process(delta: float) -> void:
 func _update_want() -> void:
 	var fc := Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))
 	want.clear()
-	for dz in range(-RD, RD + 1):
-		for dx in range(-RD, RD + 1):
-			if dx * dx + dz * dz <= RD * RD:
+	for dz in range(-rd, rd + 1):
+		for dx in range(-rd, rd + 1):
+			if dx * dx + dz * dz <= rd * rd:
 				want.append(fc + Vector2i(dx, dz))
 	want.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return (a - fc).length_squared() < (b - fc).length_squared())
@@ -615,7 +616,7 @@ func _do_mesh() -> bool:
 
 func _unload() -> void:
 	var fc := Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))
-	var lim := (RD + 3) * (RD + 3)
+	var lim := (rd + 3) * (rd + 3)
 	for kv in chunks.keys():
 		var k: Vector2i = kv
 		if (k - fc).length_squared() <= lim:

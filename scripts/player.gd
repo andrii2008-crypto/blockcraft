@@ -3,6 +3,8 @@ extends Node3D
 const WorldScript = preload("res://scripts/world.gd")
 const Dbg = preload("res://scripts/dbg.gd")
 
+signal pause_requested
+
 const R := 0.3
 const H := 1.8
 const EYE := 1.62
@@ -10,7 +12,6 @@ const GRAVITY := 28.0
 const JUMP_V := 9.0
 const SPEED := 4.6
 const REACH := 5.0
-const SENS := 0.004
 const JOY_R := 90.0
 
 var world: WorldScript
@@ -40,6 +41,7 @@ var jump_id := -1
 var needs_spawn := true
 var dbg_n := 0
 var proc_ms := 0.0
+var sens := 0.004
 var loading := true
 var in_water := false
 var head_water := false
@@ -50,7 +52,7 @@ func _ready() -> void:
 	cam.position = Vector3(0, EYE, 0)
 	cam.fov = 75.0
 	cam.near = 0.05
-	cam.far = WorldScript.RD * 16.0 + 32.0
+	apply_view()
 	add_child(cam)
 	highlight = MeshInstance3D.new()
 	var box := BoxMesh.new()
@@ -64,6 +66,17 @@ func _ready() -> void:
 	highlight.top_level = true
 	highlight.visible = false
 	add_child(highlight)
+
+
+func apply_view() -> void:
+	cam.far = world.rd * 16.0 + 32.0
+
+
+func reset_touch() -> void:
+	move_id = -1
+	look_id = -1
+	jump_id = -1
+	move_vec = Vector2.ZERO
 
 
 func _input(event: InputEvent) -> void:
@@ -80,7 +93,9 @@ func _input(event: InputEvent) -> void:
 			if dbg_n < 30:
 				dbg_n += 1
 				Dbg.put("touch down %s hit=%s loading=%s" % [str(p), hit, str(loading)])
-			if hit == "jump":
+			if hit == "pause":
+				pause_requested.emit()
+			elif hit == "jump":
 				jump_id = event.index
 			elif hit.begins_with("slot"):
 				selected = int(hit.substr(4))
@@ -112,8 +127,8 @@ func _input(event: InputEvent) -> void:
 			move_vec = ((pos - move_origin) / JOY_R).limit_length(1.0)
 		elif event.index == look_id:
 			var d: Vector2 = event.relative
-			rotation.y -= d.x * SENS
-			pitch = clampf(pitch - d.y * SENS, -1.5, 1.5)
+			rotation.y -= d.x * sens
+			pitch = clampf(pitch - d.y * sens, -1.5, 1.5)
 			if (pos - look_start).length() > 24.0:
 				look_moved = true
 

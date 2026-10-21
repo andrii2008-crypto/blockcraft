@@ -6,7 +6,7 @@ const CS := 16
 const SY := 64
 const SEA := 22
 const VOL := CS * SY * CS      # в байте [VOL] хранится максимальная высота чанка
-const RD := 5                  # дальность прорисовки в чанках
+const RD := 4                  # дальность прорисовки в чанках
 const MAX_GEN := 3
 const MAX_MESH := 3
 const SAVE_PATH := "user://world2.dat"
@@ -546,101 +546,71 @@ func _remesh(key: Vector2i) -> void:
 	meshed[key] = true
 
 
-# ---------- потоки ----------
+# ---------- подгрузка чанков (без потоков: одно задание за кадр) ----------
 
-func _gen_task(key: Vector2i) -> void:
-	var d: PackedByteArray
-	mutex.lock()
-	var s: Variant = saved.get(key)
-	mutex.unlock()
-	if s != null:
-		d = s
-	else:
-		d = _gen_chunk(key.x, key.y)
-	mutex.lock()
-	gen_results.append([key, d])
-	mutex.unlock()
-
-
-func _mesh_task(key: Vector2i, c: PackedByteArray, px: PackedByteArray, nx: PackedByteArray, pz: PackedByteArray, nz: PackedByteArray, ver: int) -> void:
-	var res := _mesh_data(key.x * CS, key.y * CS, c, px, nx, pz, nz)
-	mutex.lock()
-	mesh_results.append([key, res, ver])
-	mutex.unlock()
+var want: Array[Vector2i] = []
+var work_ms := 0.0
+var toggle := false
 
 
 func _process(delta: float) -> void:
-	_drain()
+	var t0 := Time.get_ticks_usec()
 	sched_timer -= delta
 	if sched_timer <= 0.0:
-		sched_timer = 0.12
-		_schedule()
+		sched_timer = 0.15
+		_update_want()
+	toggle = not toggle
+	if toggle:
+		if not _do_gen():
+			_do_mesh()
+	else:
+		if not _do_mesh():
+			_do_gen()
 	unload_timer -= delta
 	if unload_timer <= 0.0:
 		unload_timer = 1.5
 		_unload()
+	work_ms = (Time.get_ticks_usec() - t0) / 1000.0
 
 
-func _drain() -> void:
-	mutex.lock()
-	var gr: Array = gen_results
-	gen_results = []
-	var mr: Array = mesh_results
-	mesh_results = []
-	mutex.unlock()
-	for r in gr:
-		var key: Vector2i = r[0]
-		chunks[key] = r[1]
-		gen_pending.erase(key)
-		n_gen += 1
-		if n_gen <= 6 or n_gen % 25 == 0:
-			Dbg.put("gen done %d %s" % [n_gen, str(key)])
-	for r in mr:
-		var key: Vector2i = r[0]
-		mesh_pending.erase(key)
-		if chunks.has(key) and int(r[2]) == int(mesh_ver.get(key, 0)):
-			_apply(key, r[1])
-			meshed[key] = true
-			n_mesh += 1
-			if n_mesh <= 6 or n_mesh % 25 == 0:
-				Dbg.put("mesh done %d %s" % [n_mesh, str(key)])
-
-
-func _schedule() -> void:
+func _update_want() -> void:
 	var fc := Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))
-	var want: Array[Vector2i] = []
+	want.clear()
 	for dz in range(-RD, RD + 1):
 		for dx in range(-RD, RD + 1):
 			if dx * dx + dz * dz <= RD * RD:
 				want.append(fc + Vector2i(dx, dz))
 	want.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return (a - fc).length_squared() < (b - fc).length_squared())
+
+
+func _do_gen() -> bool:
 	for k in want:
-		if gen_pending.size() >= MAX_GEN:
-			break
-		if not chunks.has(k) and not gen_pending.has(k):
-			gen_pending[k] = true
-			n_req += 1
-			if n_req <= 6:
-				Dbg.put("req gen " + str(k))
-			WorkerThreadPool.add_task(_gen_task.bind(k))
+		if chunks.has(k):
+			continue
+		var s: Variant = saved.get(k)
+		if s != null:
+			chunks[k] = s
+		else:
+			chunks[k] = _gen_chunk(k.x, k.y)
+		n_gen += 1
+		if n_gen <= 6 or n_gen % 25 == 0:
+			Dbg.put("gen %d %s" % [n_gen, str(k)])
+		return true
+	return false
+
+
+func _do_mesh() -> bool:
 	for k in want:
-		if mesh_pending.size() >= MAX_MESH:
-			break
-		if meshed.has(k) or mesh_pending.has(k) or not chunks.has(k):
+		if meshed.has(k) or not chunks.has(k):
 			continue
-		var kx := k + Vector2i(1, 0)
-		var knx := k + Vector2i(-1, 0)
-		var kz := k + Vector2i(0, 1)
-		var knz := k + Vector2i(0, -1)
-		if not (chunks.has(kx) and chunks.has(knx) and chunks.has(kz) and chunks.has(knz)):
-			continue
-		mesh_pending[k] = true
-		n_mreq += 1
-		if n_mreq <= 4:
-			Dbg.put("req mesh " + str(k))
-		var ver := int(mesh_ver.get(k, 0))
-		WorkerThreadPool.add_task(_mesh_task.bind(k, chunks[k], chunks[kx], chunks[knx], chunks[kz], chunks[knz], ver))
+		if chunks.has(k + Vector2i(1, 0)) and chunks.has(k + Vector2i(-1, 0)) and chunks.has(k + Vector2i(0, 1)) and chunks.has(k + Vector2i(0, -1)):
+			_remesh(k)
+			n_mesh += 1
+			if n_mesh <= 6 or n_mesh % 25 == 0:
+				Dbg.put("mesh %d %s" % [n_mesh, str(k)])
+			return true
+	return false
 
 
 func _unload() -> void:
@@ -651,9 +621,7 @@ func _unload() -> void:
 		if (k - fc).length_squared() <= lim:
 			continue
 		if modified.has(k):
-			mutex.lock()
 			saved[k] = chunks[k]
-			mutex.unlock()
 		chunks.erase(k)
 		meshed.erase(k)
 		mesh_ver.erase(k)
@@ -661,6 +629,31 @@ func _unload() -> void:
 			var mi: MeshInstance3D = meshes[k]
 			mi.queue_free()
 			meshes.erase(k)
+
+
+func _top_block(x: int, z: int) -> int:
+	for y in range(SY - 1, -1, -1):
+		var b := get_block(x, y, z)
+		if b != AIR:
+			return b
+	return AIR
+
+
+# Ближайшая к (x, z) колонка без дерева/кактуса/воды, чтобы не появиться внутри ствола
+func clear_spawn(x: int, z: int) -> Vector2i:
+	for r in range(0, 9):
+		for dx in range(-r, r + 1):
+			for dz in range(-r, r + 1):
+				if maxi(absi(dx), absi(dz)) != r:
+					continue
+				var cx := x + dx
+				var cz := z + dz
+				if not chunks.has(Vector2i(cx >> 4, cz >> 4)):
+					continue
+				var tb := _top_block(cx, cz)
+				if tb != WOOD and tb != LEAVES and tb != SPRUCE_LEAVES and tb != CACTUS and tb != WATER:
+					return Vector2i(cx, cz)
+	return Vector2i(x, z)
 
 
 # ---------- сохранение ----------

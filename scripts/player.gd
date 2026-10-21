@@ -39,6 +39,7 @@ var repeat_timer := 0.0
 var jump_id := -1
 var needs_spawn := true
 var dbg_n := 0
+var proc_ms := 0.0
 var loading := true
 var in_water := false
 var head_water := false
@@ -118,6 +119,12 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	_tick(delta)
+	proc_ms = (Time.get_ticks_usec() - t0) / 1000.0
+
+
+func _tick(delta: float) -> void:
 	cam.rotation.x = pitch
 	world.focus = position
 	if needs_spawn:
@@ -126,7 +133,8 @@ func _process(delta: float) -> void:
 		if not world.ready_at(Vector3(sx, 0.0, sz)):
 			loading = true
 			return
-		position = Vector3(sx + 0.5, world.surface_y(sx, sz) + 0.01, sz + 0.5)
+		var sp := world.clear_spawn(sx, sz)
+		position = Vector3(sp.x + 0.5, world.surface_y(sp.x, sp.y) + 0.01, sp.y + 0.5)
 		vel = Vector3.ZERO
 		needs_spawn = false
 	if not world.ready_at(position):

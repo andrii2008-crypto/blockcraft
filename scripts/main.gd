@@ -8,17 +8,16 @@ const Dbg = preload("res://scripts/dbg.gd")
 var world: WorldScript
 var player: Node3D
 var ready_done := false
+var slow_n := 0
 
 
 func _ready() -> void:
 	var prev := Dbg.start()
 	Dbg.put("boot")
+	Dbg.put("gpu " + RenderingServer.get_video_adapter_name() + " | " + OS.get_name())
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.53, 0.75, 0.95)
-	env.fog_enabled = true
-	env.fog_light_color = env.background_color
-	env.fog_density = 0.006
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -52,6 +51,12 @@ func _ready() -> void:
 	timer.timeout.connect(_save)
 	add_child(timer)
 	ready_done = true
+
+
+func _process(delta: float) -> void:
+	if ready_done and delta > 0.4 and slow_n < 12:
+		slow_n += 1
+		Dbg.put("slow frame %.2fs world=%.0fms player=%.0fms" % [delta, world.work_ms, player.proc_ms])
 
 
 func _save() -> void:

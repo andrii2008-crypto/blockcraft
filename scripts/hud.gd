@@ -54,7 +54,7 @@ func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var pp: Vector3 = player.position
 	draw_string(font, Vector2(16, 28), "XYZ: %d %d %d" % [int(pp.x), int(pp.y), int(pp.z)], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.9))
-	draw_string(font, Vector2(16, vs.y - 130.0), "chunks %d meshed %d pend %d fps %d" % [player.world.chunks.size(), player.world.meshed.size(), player.world.gen_pending.size(), Engine.get_frames_per_second()], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.8))
+	draw_string(font, Vector2(16, vs.y - 130.0), "chunks %d meshed %d world %.0fms player %.0fms fps %d" % [player.world.chunks.size(), player.world.meshed.size(), player.world.work_ms, player.proc_ms, Engine.get_frames_per_second()], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.8))
 	if prev_log != "" and age < 40.0:
 		var lines := prev_log.strip_edges().split("\n")
 		var first := maxi(0, lines.size() - 14)

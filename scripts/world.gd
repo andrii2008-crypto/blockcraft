@@ -10,6 +10,7 @@ const RD := 5                  # дальность прорисовки в ча
 const MAX_GEN := 3
 const MAX_MESH := 3
 const SAVE_PATH := "user://world2.dat"
+const Dbg = preload("res://scripts/dbg.gd")
 
 enum { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, PLANKS, SAND, BRICK, WATER, BEDROCK, GRAVEL, SNOW, CACTUS, SPRUCE_LEAVES, COAL, IRON, GOLD, DIAMOND }
 enum { B_OCEAN, B_BEACH, B_PLAINS, B_FOREST, B_DESERT, B_SNOWY, B_MOUNTAIN }
@@ -46,6 +47,10 @@ var has_saved_pos := false
 var saved_pos := Vector3.ZERO
 var sched_timer := 0.0
 var unload_timer := 0.0
+var n_gen := 0
+var n_mesh := 0
+var n_req := 0
+var n_mreq := 0
 
 
 func setup() -> void:
@@ -587,12 +592,18 @@ func _drain() -> void:
 		var key: Vector2i = r[0]
 		chunks[key] = r[1]
 		gen_pending.erase(key)
+		n_gen += 1
+		if n_gen <= 6 or n_gen % 25 == 0:
+			Dbg.put("gen done %d %s" % [n_gen, str(key)])
 	for r in mr:
 		var key: Vector2i = r[0]
 		mesh_pending.erase(key)
 		if chunks.has(key) and int(r[2]) == int(mesh_ver.get(key, 0)):
 			_apply(key, r[1])
 			meshed[key] = true
+			n_mesh += 1
+			if n_mesh <= 6 or n_mesh % 25 == 0:
+				Dbg.put("mesh done %d %s" % [n_mesh, str(key)])
 
 
 func _schedule() -> void:
@@ -609,6 +620,9 @@ func _schedule() -> void:
 			break
 		if not chunks.has(k) and not gen_pending.has(k):
 			gen_pending[k] = true
+			n_req += 1
+			if n_req <= 6:
+				Dbg.put("req gen " + str(k))
 			WorkerThreadPool.add_task(_gen_task.bind(k))
 	for k in want:
 		if mesh_pending.size() >= MAX_MESH:
@@ -622,6 +636,9 @@ func _schedule() -> void:
 		if not (chunks.has(kx) and chunks.has(knx) and chunks.has(kz) and chunks.has(knz)):
 			continue
 		mesh_pending[k] = true
+		n_mreq += 1
+		if n_mreq <= 4:
+			Dbg.put("req mesh " + str(k))
 		var ver := int(mesh_ver.get(k, 0))
 		WorkerThreadPool.add_task(_mesh_task.bind(k, chunks[k], chunks[kx], chunks[knx], chunks[kz], chunks[knz], ver))
 

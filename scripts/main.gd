@@ -3,6 +3,7 @@ extends Node3D
 const WorldScript = preload("res://scripts/world.gd")
 const PlayerScript = preload("res://scripts/player.gd")
 const HudScript = preload("res://scripts/hud.gd")
+const Dbg = preload("res://scripts/dbg.gd")
 
 var world: WorldScript
 var player: Node3D
@@ -10,6 +11,8 @@ var ready_done := false
 
 
 func _ready() -> void:
+	var prev := Dbg.start()
+	Dbg.put("boot")
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.53, 0.75, 0.95)
@@ -23,6 +26,7 @@ func _ready() -> void:
 	world = WorldScript.new()
 	add_child(world)
 	world.setup()
+	Dbg.put("setup ok spawn=%s seed=%d" % [str(world.spawn_xz), world.seed_val])
 
 	player = PlayerScript.new()
 	player.world = world
@@ -39,6 +43,8 @@ func _ready() -> void:
 	layer.add_child(hud)
 	hud.player = player
 	player.hud = hud
+	hud.prev_log = prev
+	Dbg.put("player+hud ok")
 
 	var timer := Timer.new()
 	timer.wait_time = 20.0
@@ -57,4 +63,5 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED \
 			or what == NOTIFICATION_WM_CLOSE_REQUEST \
 			or what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		Dbg.put("notification %d" % what)
 		_save()

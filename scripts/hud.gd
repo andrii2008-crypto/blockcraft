@@ -5,6 +5,8 @@ const GAP := 8.0
 var player = null
 var slot_rects: Array[Rect2] = []
 var jump_rect := Rect2()
+var prev_log := ""
+var age := 0.0
 
 
 func _ready() -> void:
@@ -13,6 +15,7 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	age += _delta
 	queue_redraw()
 
 
@@ -51,6 +54,12 @@ func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var pp: Vector3 = player.position
 	draw_string(font, Vector2(16, 28), "XYZ: %d %d %d" % [int(pp.x), int(pp.y), int(pp.z)], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.9))
+	draw_string(font, Vector2(16, vs.y - 130.0), "chunks %d meshed %d pend %d fps %d" % [player.world.chunks.size(), player.world.meshed.size(), player.world.gen_pending.size(), Engine.get_frames_per_second()], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.8))
+	if prev_log != "" and age < 40.0:
+		var lines := prev_log.strip_edges().split("\n")
+		var first := maxi(0, lines.size() - 14)
+		for li in range(first, lines.size()):
+			draw_string(font, Vector2(16, 60.0 + (li - first) * 20.0), lines[li], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 1, 0.3, 0.95))
 	if player.loading:
 		draw_string(font, Vector2(c.x - 90.0, c.y - 60.0), "Loading world...", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1, 1, 1, 0.95))
 	if player.move_id != -1:

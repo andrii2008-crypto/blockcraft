@@ -1,6 +1,7 @@
 extends Node3D
 
 const WorldScript = preload("res://scripts/world.gd")
+const Dbg = preload("res://scripts/dbg.gd")
 
 const R := 0.3
 const H := 1.8
@@ -37,6 +38,7 @@ var hold_acted := false
 var repeat_timer := 0.0
 var jump_id := -1
 var needs_spawn := true
+var dbg_n := 0
 var loading := true
 var in_water := false
 var head_water := false
@@ -64,6 +66,9 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if dbg_n < 14:
+		dbg_n += 1
+		Dbg.put("event " + event.as_text())
 	if hud == null:
 		return
 	var size := get_viewport().get_visible_rect().size
@@ -71,6 +76,9 @@ func _input(event: InputEvent) -> void:
 		var p: Vector2 = event.position
 		if event.pressed:
 			var hit: String = hud.hit_test(p)
+			if dbg_n < 30:
+				dbg_n += 1
+				Dbg.put("touch down %s hit=%s loading=%s" % [str(p), hit, str(loading)])
 			if hit == "jump":
 				jump_id = event.index
 			elif hit.begins_with("slot"):
@@ -222,6 +230,9 @@ func _update_target() -> void:
 
 
 func break_block() -> void:
+	if dbg_n < 40:
+		dbg_n += 1
+		Dbg.put("break_block target=" + str(target))
 	if target.is_empty():
 		return
 	var p: Vector3i = target["pos"]
@@ -231,6 +242,9 @@ func break_block() -> void:
 
 
 func place_block() -> void:
+	if dbg_n < 40:
+		dbg_n += 1
+		Dbg.put("place_block target=" + str(target))
 	if target.is_empty():
 		return
 	var n: Vector3i = target["normal"]

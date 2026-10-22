@@ -8,6 +8,8 @@ signal quit_to_menu_pressed
 signal quit_game_pressed
 signal settings_changed
 
+const Dbg = preload("res://scripts/dbg.gd")
+
 enum { MAIN, SETTINGS, CONFIRM, PAUSE }
 
 const GLYPHS := {
@@ -34,7 +36,7 @@ var has_save := false
 var buttons: Array = []
 var pressed_idx := -1
 var touch_id := -1
-var tex: ImageTexture
+var tex: Texture2D
 var splash := ""
 var t := 0.0
 
@@ -70,6 +72,10 @@ func go_back() -> bool:
 
 
 func _make_tex() -> void:
+	var im := Dbg.load_image("res://textures/dirt_tile.bytes")
+	if im != null:
+		tex = ImageTexture.create_from_image(im)
+		return
 	var img := Image.create(128, 128, false, Image.FORMAT_RGB8)
 	for by in 16:
 		for bx in 16:

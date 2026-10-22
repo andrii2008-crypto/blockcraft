@@ -25,3 +25,13 @@ static func put(msg: String) -> void:
 	f.seek_end()
 	f.store_line("%d %s" % [Time.get_ticks_msec(), msg])
 	f.close()
+
+
+static func load_image(path: String) -> Image:
+	if not FileAccess.file_exists(path):
+		return null
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var img := Image.new()
+	if img.load_png_from_buffer(bytes) != OK:
+		return null
+	return img

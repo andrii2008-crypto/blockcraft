@@ -13,7 +13,7 @@ const MAX_MESH := 3
 const SAVE_PATH := "user://world2.dat"
 const Dbg = preload("res://scripts/dbg.gd")
 
-enum { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, PLANKS, SAND, BRICK, WATER, BEDROCK, GRAVEL, SNOW, CACTUS, SPRUCE_LEAVES, COAL, IRON, GOLD, DIAMOND }
+enum { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, PLANKS, SAND, BRICK, WATER, BEDROCK, GRAVEL, SNOW, CACTUS, SPRUCE_LEAVES, COAL, IRON, GOLD, DIAMOND, SPRUCE_WOOD }
 enum { B_OCEAN, B_BEACH, B_PLAINS, B_FOREST, B_DESERT, B_SNOWY, B_MOUNTAIN }
 
 const CORNERS := [
@@ -24,6 +24,7 @@ const CORNERS := [
 	[Vector3(1, 0, 1), Vector3(1, 1, 1), Vector3(0, 1, 1), Vector3(0, 0, 1)],
 	[Vector3(0, 0, 0), Vector3(0, 1, 0), Vector3(1, 1, 0), Vector3(1, 0, 0)],
 ]
+const ATLAS_INSET := 4.0 / 512.0
 const SHADE := [0.8, 0.8, 1.0, 0.5, 0.65, 0.65]
 const FACE_PAL := [1, 1, 0, 2, 1, 1]   # 0 = верх, 1 = бок, 2 = низ
 
@@ -42,6 +43,9 @@ var mutex := Mutex.new()
 var material: StandardMaterial3D
 var water_material: StandardMaterial3D
 var pal: Array = []
+var atlas: Texture2D = null
+var use_tex := false
+var tex_status := ""
 var focus := Vector3.ZERO
 var spawn_xz := Vector2i.ZERO
 var has_saved_pos := false
@@ -67,6 +71,12 @@ func setup() -> void:
 	water_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_load_atlas()
+	if use_tex:
+		material.albedo_texture = atlas
+		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		water_material.albedo_texture = atlas
+		water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	if fresh or not load_world():
 		seed_val = randi() % 1000000
 	spawn_xz = find_spawn()
@@ -91,7 +101,7 @@ func _init_palette() -> void:
 	var gravel := Color(0.55, 0.53, 0.52)
 	var snow := Color(0.95, 0.97, 1.0)
 	var cactus := Color(0.15, 0.45, 0.18)
-	pal.resize(19)
+	pal.resize(20)
 	pal[AIR] = [Color.BLACK, Color.BLACK, Color.BLACK]
 	pal[GRASS] = [Color(0.36, 0.65, 0.22), dirt, dirt]
 	pal[DIRT] = [dirt, dirt, dirt]
@@ -110,7 +120,45 @@ func _init_palette() -> void:
 	pal[COAL] = [Color(0.12, 0.12, 0.14), Color(0.12, 0.12, 0.14), Color(0.12, 0.12, 0.14)]
 	pal[IRON] = [Color(0.82, 0.62, 0.5), Color(0.82, 0.62, 0.5), Color(0.82, 0.62, 0.5)]
 	pal[GOLD] = [Color(0.98, 0.82, 0.15), Color(0.98, 0.82, 0.15), Color(0.98, 0.82, 0.15)]
+	pal[SPRUCE_WOOD] = [Color(0.55, 0.4, 0.25), Color(0.35, 0.22, 0.15), Color(0.55, 0.4, 0.25)]
 	pal[DIAMOND] = [Color(0.3, 0.92, 0.92), Color(0.3, 0.92, 0.92), Color(0.3, 0.92, 0.92)]
+
+
+func _load_atlas() -> void:
+	tex_status = "file missing or bad PNG"
+	var img := Dbg.load_image("res://textures/atlas.bytes")
+	if img != null:
+		img.generate_mipmaps()
+		atlas = ImageTexture.create_from_image(img)
+		use_tex = true
+		tex_status = "ok"
+	Dbg.put("atlas " + tex_status)
+
+
+# Номер плитки в атласе для грани блока (0 = белая плитка, цвет берётся из палитры)
+# Плитки: 1 земля, 2 кора дуба, 3 кора ели, 4 листья дуба, 5 листья ели, 6 вода, 7 трава сверху, 8 трава сбоку
+func block_tile(b: int, fp: int) -> int:
+	if b == GRASS:
+		if fp == 0:
+			return 7
+		return 8 if fp == 1 else 1
+	if b == DIRT:
+		return 1
+	if b == WOOD:
+		return 2 if fp == 1 else 0
+	if b == SPRUCE_WOOD:
+		return 3 if fp == 1 else 0
+	if b == LEAVES:
+		return 4
+	if b == SPRUCE_LEAVES:
+		return 5
+	if b == WATER:
+		return 6
+	return 0
+
+
+func tile_src(tile: int) -> Rect2:
+	return Rect2((tile & 3) * 128, (tile >> 2) * 128, 128, 128)
 
 
 # ---------- доступ к блокам ----------
@@ -139,7 +187,7 @@ func ready_at(p: Vector3) -> bool:
 func surface_y(x: int, z: int) -> int:
 	for y in range(SY - 1, -1, -1):
 		var b := get_block(x, y, z)
-		if b == AIR or b == LEAVES or b == SPRUCE_LEAVES or b == WOOD or b == CACTUS:
+		if b == AIR or b == LEAVES or b == SPRUCE_LEAVES or b == WOOD or b == SPRUCE_WOOD or b == CACTUS:
 			continue
 		return y + 1
 	return SY
@@ -400,7 +448,7 @@ func _gen_chunk(cx: int, cz: int) -> PackedByteArray:
 			elif biome == B_SNOWY:
 				var th := 5 + int(r2 * 3.0)
 				for i in range(1, th + 1):
-					_put(out, x0, z0, wx, h + i, wz, WOOD, false)
+					_put(out, x0, z0, wx, h + i, wz, SPRUCE_WOOD, false)
 				var topy := h + th + 1
 				for y in range(h + 3, topy + 1):
 					var d := topy - y
@@ -428,19 +476,37 @@ func _gen_chunk(cx: int, cz: int) -> PackedByteArray:
 
 # ---------- построение мешей ----------
 
-func _quad(v: PackedVector3Array, cl: PackedColorArray, ix: PackedInt32Array, pos: Vector3, f: int, b: int, jit: float, lower: bool) -> void:
+func _quad(v: PackedVector3Array, cl: PackedColorArray, ix: PackedInt32Array, uv: PackedVector2Array, pos: Vector3, f: int, b: int, jit: float, lower: bool) -> void:
 	var base := v.size()
 	var shade: float = SHADE[f] + jit
 	var fp: int = FACE_PAL[f]
 	var corners: Array = CORNERS[f]
 	var ore := b >= COAL and b <= DIAMOND
+	var tile := 0
+	if use_tex:
+		tile = block_tile(b, fp)
+	var tu := float(tile & 3) * 0.25 + ATLAS_INSET
+	var tv := float(tile >> 2) * 0.25 + ATLAS_INSET
+	var ts := 0.25 - 2.0 * ATLAS_INSET
 	for k in 4:
 		var c: Vector3 = corners[k]
 		var cy := c.y
 		if lower and cy > 0.5:
 			cy = 0.9
 		v.append(pos + Vector3(c.x, cy, c.z))
+		var uu := c.x
+		var vv := c.z
+		if f < 2:
+			uu = c.z
+			vv = 1.0 - c.y
+		elif f >= 4:
+			uu = c.x
+			vv = 1.0 - c.y
+		uv.append(Vector2(tu + uu * ts, tv + vv * ts))
 		var col: Color = pal[b][fp]
+		if tile > 0:
+			cl.append(Color(shade, shade, shade, col.a))
+			continue
 		if b == GRASS and fp == 1 and c.y > 0.5:
 			col = pal[b][0]
 		elif ore and (k & 1) == 0:
@@ -449,13 +515,14 @@ func _quad(v: PackedVector3Array, cl: PackedColorArray, ix: PackedInt32Array, po
 	ix.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
 
 
-func _pack(v: PackedVector3Array, cl: PackedColorArray, ix: PackedInt32Array):
+func _pack(v: PackedVector3Array, cl: PackedColorArray, ix: PackedInt32Array, uv: PackedVector2Array):
 	if v.is_empty():
 		return null
 	var a := []
 	a.resize(Mesh.ARRAY_MAX)
 	a[Mesh.ARRAY_VERTEX] = v
 	a[Mesh.ARRAY_COLOR] = cl
+	a[Mesh.ARRAY_TEX_UV] = uv
 	a[Mesh.ARRAY_INDEX] = ix
 	return a
 
@@ -467,6 +534,8 @@ func _mesh_data(ox: int, oz: int, c: PackedByteArray, px: PackedByteArray, nx: P
 	var wv := PackedVector3Array()
 	var wc := PackedColorArray()
 	var wi := PackedInt32Array()
+	var su := PackedVector2Array()
+	var wu := PackedVector2Array()
 	var top: int = c[VOL]
 	for y in range(0, mini(top + 2, SY)):
 		for lz in CS:
@@ -504,10 +573,10 @@ func _mesh_data(ox: int, oz: int, c: PackedByteArray, px: PackedByteArray, nx: P
 					if (vis & (1 << f)) == 0:
 						continue
 					if b == WATER:
-						_quad(wv, wc, wi, pos, f, b, jit, lower)
+						_quad(wv, wc, wi, wu, pos, f, b, jit, lower)
 					else:
-						_quad(sv, sc, si, pos, f, b, jit, false)
-	return [_pack(sv, sc, si), _pack(wv, wc, wi)]
+						_quad(sv, sc, si, su, pos, f, b, jit, false)
+	return [_pack(sv, sc, si, su), _pack(wv, wc, wi, wu)]
 
 
 func _apply(key: Vector2i, res: Array) -> void:
@@ -652,7 +721,7 @@ func clear_spawn(x: int, z: int) -> Vector2i:
 				if not chunks.has(Vector2i(cx >> 4, cz >> 4)):
 					continue
 				var tb := _top_block(cx, cz)
-				if tb != WOOD and tb != LEAVES and tb != SPRUCE_LEAVES and tb != CACTUS and tb != WATER:
+				if tb != WOOD and tb != SPRUCE_WOOD and tb != LEAVES and tb != SPRUCE_LEAVES and tb != CACTUS and tb != WATER:
 					return Vector2i(cx, cz)
 	return Vector2i(x, z)
 

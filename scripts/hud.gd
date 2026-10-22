@@ -59,6 +59,8 @@ func _draw() -> void:
 	if show_info:
 		var pp: Vector3 = player.position
 		draw_string(font, Vector2(16, 28), "XYZ: %d %d %d   FPS: %d" % [int(pp.x), int(pp.y), int(pp.z), Engine.get_frames_per_second()], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.9))
+	if show_info and not player.world.use_tex:
+		draw_string(font, Vector2(16, 54), "NO TEXTURES: " + player.world.tex_status, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.4, 0.4, 0.95))
 	if player.loading:
 		draw_string(font, Vector2(c.x - 90.0, c.y - 60.0), "Loading world...", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1, 1, 1, 0.95))
 	# кнопка паузы
@@ -84,8 +86,15 @@ func _draw() -> void:
 	for i in slot_rects.size():
 		var rc: Rect2 = slot_rects[i]
 		var b: int = player.hotbar[i]
-		var col: Color = player.world.pal[b][0]
+		var wd = player.world
+		var tl: int = wd.block_tile(b, 0)
+		if tl == 0:
+			tl = wd.block_tile(b, 1)
 		draw_rect(rc, Color(0, 0, 0, 0.45))
-		draw_rect(rc.grow(-10.0), col)
+		if tl > 0 and wd.use_tex:
+			draw_texture_rect_region(wd.atlas, rc.grow(-8.0), wd.tile_src(tl))
+		else:
+			var col: Color = wd.pal[b][0]
+			draw_rect(rc.grow(-10.0), col)
 		if i == player.selected:
 			draw_rect(rc, Color.WHITE, false, 4.0)

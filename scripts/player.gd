@@ -261,7 +261,7 @@ func break_block() -> void:
 	var p: Vector3i = target["pos"]
 	if world.get_block(p.x, p.y, p.z) == WorldScript.BEDROCK:
 		return
-	world.set_block(p, WorldScript.AIR)
+	world.edit(p, WorldScript.AIR)
 
 
 func place_block() -> void:
@@ -280,7 +280,7 @@ func place_block() -> void:
 		return
 	if _overlaps(p):
 		return
-	world.set_block(p, hotbar[selected])
+	world.edit(p, hotbar[selected])
 
 
 func _overlaps(p: Vector3i) -> bool:

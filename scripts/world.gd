@@ -28,7 +28,20 @@ const ATLAS_INSET := 4.0 / 512.0
 const SHADE := [0.8, 0.8, 1.0, 0.5, 0.65, 0.65]
 const FACE_PAL := [1, 1, 0, 2, 1, 1]   # 0 = верх, 1 = бок, 2 = низ
 
+signal block_changed(p: Vector3i, b: int)
+
+const FLOW_DIRS := [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1), Vector3i(0, -1, 0)]
+
 var seed_val := 0
+var is_client := false
+var forced_seed := -1
+var extra_foci: Array[Vector3] = []
+var net = null
+var dirty := {}
+var pending_edits := {}
+var flow_queue: Array[Vector3i] = []
+var flow_timer := 0.0
+var main_fc := Vector2i.ZERO
 var chunks := {}          # Vector2i -> PackedByteArray
 var meshes := {}
 var meshed := {}
@@ -79,6 +92,8 @@ func setup() -> void:
 		water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	if fresh or not load_world():
 		seed_val = randi() % 1000000
+	if forced_seed >= 0:
+		seed_val = forced_seed
 	spawn_xz = find_spawn()
 	if has_saved_pos:
 		focus = saved_pos
@@ -193,29 +208,121 @@ func surface_y(x: int, z: int) -> int:
 	return SY
 
 
+func edit(p: Vector3i, b: int) -> void:
+	if is_client and net != null:
+		net.send_edit(p, b)
+	else:
+		set_block(p, b)
+
+
 func set_block(p: Vector3i, b: int) -> void:
+	if _write(p, b, true):
+		_flush_dirty()
+		if b == AIR:
+			_flow_check(p)
+
+
+func apply_remote_edit(p: Vector3i, b: int) -> void:
 	if p.y < 0 or p.y >= SY:
 		return
+	if _write(p, b, false):
+		_flush_dirty()
+	else:
+		var key := Vector2i(p.x >> 4, p.z >> 4)
+		if not pending_edits.has(key):
+			pending_edits[key] = []
+		pending_edits[key].append([p, b])
+
+
+func _apply_pending(key: Vector2i) -> void:
+	var lst: Array = pending_edits[key]
+	pending_edits.erase(key)
+	for e in lst:
+		var p: Vector3i = e[0]
+		_write(p, int(e[1]), false)
+
+
+func _write(p: Vector3i, b: int, emit: bool) -> bool:
+	if p.y < 0 or p.y >= SY:
+		return false
 	var key := Vector2i(p.x >> 4, p.z >> 4)
 	var arr: PackedByteArray = chunks.get(key, PackedByteArray())
 	if arr.is_empty():
-		return
+		return false
 	arr[(p.y * CS + (p.z & 15)) * CS + (p.x & 15)] = b
 	if b != AIR and p.y > arr[VOL]:
 		arr[VOL] = p.y
 	chunks[key] = arr
 	modified[key] = true
-	_remesh(key)
+	dirty[key] = true
 	var lx := p.x & 15
 	var lz := p.z & 15
 	if lx == 0:
-		_remesh(key + Vector2i(-1, 0))
+		dirty[key + Vector2i(-1, 0)] = true
 	if lx == 15:
-		_remesh(key + Vector2i(1, 0))
+		dirty[key + Vector2i(1, 0)] = true
 	if lz == 0:
-		_remesh(key + Vector2i(0, -1))
+		dirty[key + Vector2i(0, -1)] = true
 	if lz == 15:
-		_remesh(key + Vector2i(0, 1))
+		dirty[key + Vector2i(0, 1)] = true
+	if emit:
+		block_changed.emit(p, b)
+	return true
+
+
+func _flush_dirty() -> void:
+	for kv in dirty.keys():
+		var k: Vector2i = kv
+		if chunks.has(k) and meshed.has(k):
+			_remesh(k)
+	dirty.clear()
+
+
+# Вода заполняет пустоты на уровне моря и ниже (как океан, из которого убрали блок)
+func _flow_check(p: Vector3i) -> void:
+	if is_client or p.y > SEA:
+		return
+	if flow_queue.size() < 600:
+		flow_queue.append(p)
+
+
+func _has_water_src(p: Vector3i) -> bool:
+	return (get_block(p.x, p.y + 1, p.z) == WATER or get_block(p.x + 1, p.y, p.z) == WATER
+		or get_block(p.x - 1, p.y, p.z) == WATER or get_block(p.x, p.y, p.z + 1) == WATER
+		or get_block(p.x, p.y, p.z - 1) == WATER)
+
+
+func _flow_tick() -> void:
+	var n := 0
+	while n < 8 and not flow_queue.is_empty():
+		var p: Vector3i = flow_queue.pop_front()
+		if p.y > SEA or p.y < 1:
+			continue
+		if get_block(p.x, p.y, p.z) != AIR:
+			continue
+		if not chunks.has(Vector2i(p.x >> 4, p.z >> 4)):
+			continue
+		if not _has_water_src(p):
+			continue
+		if _write(p, WATER, true):
+			n += 1
+			for d in FLOW_DIRS:
+				var q: Vector3i = p + d
+				if q.y <= SEA and flow_queue.size() < 600:
+					flow_queue.append(q)
+	if n > 0:
+		_flush_dirty()
+
+
+func collect_modified() -> Dictionary:
+	var d := {}
+	for kv in modified.keys():
+		var k: Vector2i = kv
+		if chunks.has(k):
+			d[k] = chunks[k]
+		elif saved.has(k):
+			d[k] = saved[k]
+	return d
 
 
 func raycast(origin: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
@@ -636,6 +743,11 @@ func _process(delta: float) -> void:
 	else:
 		if not _do_mesh():
 			_do_gen()
+	flow_timer -= delta
+	if flow_timer <= 0.0:
+		flow_timer = 0.1
+		if not flow_queue.is_empty():
+			_flow_tick()
 	unload_timer -= delta
 	if unload_timer <= 0.0:
 		unload_timer = 1.5
@@ -645,11 +757,20 @@ func _process(delta: float) -> void:
 
 func _update_want() -> void:
 	var fc := Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))
+	main_fc = fc
+	var centers: Array[Vector2i] = [fc]
+	for f in extra_foci:
+		centers.append(Vector2i(floori(f.x / 16.0), floori(f.z / 16.0)))
+	var seen := {}
 	want.clear()
-	for dz in range(-rd, rd + 1):
-		for dx in range(-rd, rd + 1):
-			if dx * dx + dz * dz <= rd * rd:
-				want.append(fc + Vector2i(dx, dz))
+	for c in centers:
+		for dz in range(-rd, rd + 1):
+			for dx in range(-rd, rd + 1):
+				if dx * dx + dz * dz <= rd * rd:
+					var k := c + Vector2i(dx, dz)
+					if not seen.has(k):
+						seen[k] = true
+						want.append(k)
 	want.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return (a - fc).length_squared() < (b - fc).length_squared())
 
@@ -663,6 +784,8 @@ func _do_gen() -> bool:
 			chunks[k] = s
 		else:
 			chunks[k] = _gen_chunk(k.x, k.y)
+		if pending_edits.has(k):
+			_apply_pending(k)
 		n_gen += 1
 		if n_gen <= 6 or n_gen % 25 == 0:
 			Dbg.put("gen %d %s" % [n_gen, str(k)])
@@ -674,6 +797,8 @@ func _do_mesh() -> bool:
 	for k in want:
 		if meshed.has(k) or not chunks.has(k):
 			continue
+		if (k - main_fc).length_squared() > rd * rd:
+			continue
 		if chunks.has(k + Vector2i(1, 0)) and chunks.has(k + Vector2i(-1, 0)) and chunks.has(k + Vector2i(0, 1)) and chunks.has(k + Vector2i(0, -1)):
 			_remesh(k)
 			n_mesh += 1
@@ -684,11 +809,18 @@ func _do_mesh() -> bool:
 
 
 func _unload() -> void:
-	var fc := Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))
+	var centers: Array[Vector2i] = [Vector2i(floori(focus.x / 16.0), floori(focus.z / 16.0))]
+	for f in extra_foci:
+		centers.append(Vector2i(floori(f.x / 16.0), floori(f.z / 16.0)))
 	var lim := (rd + 3) * (rd + 3)
 	for kv in chunks.keys():
 		var k: Vector2i = kv
-		if (k - fc).length_squared() <= lim:
+		var keep := false
+		for c in centers:
+			if (k - c).length_squared() <= lim:
+				keep = true
+				break
+		if keep:
 			continue
 		if modified.has(k):
 			saved[k] = chunks[k]
@@ -729,6 +861,8 @@ func clear_spawn(x: int, z: int) -> Vector2i:
 # ---------- сохранение ----------
 
 func save_world(pos: Vector3) -> void:
+	if is_client:
+		return
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
 		return
